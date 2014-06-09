@@ -193,6 +193,22 @@ static int debug = 0;
 
 static notle_version version;
 
+/*
+ * If "display_off" boot param is detected,
+ * force the display backlight to be zero.
+ * This gives the perception of screen-off,
+ * and causes the least amount of disruption
+ * to the rest of the system.
+ */
+static bool backlight_forced_off = 0;
+static int __init force_panel_off(char *str)
+{
+  backlight_forced_off = 1;
+  return 1;
+}
+__setup("display_off", force_panel_off);
+
+
 struct led_config {
   unsigned red_percent;     /* 100 * percent red in output (100 = 1% red) */
   unsigned green_percent;   /* 100 * percent green in output */
@@ -1699,6 +1715,15 @@ static int ice40_write_register(u8 reg_addr, u8 reg_value) {
 static int ice40_set_backlight(int led_en, int rev, int (*rgbmat)[3]) {
   int val;
   int ret = 0;
+
+  /*
+   * Ignore backlight setting request.
+   * See backlight_forced_off definition
+   * for more details.
+   */
+  if (backlight_forced_off) {
+    return 0;
+  }
 
   if (rgbmat != NULL) {
     const int r = rgbmat[0][0];
