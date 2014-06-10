@@ -798,22 +798,16 @@ static int bq27x00_battery_status(struct bq27x00_device_info *di,
 
 	di->cache.flags = bq27x00_read(di, BQ27x00_REG_FLAGS, false);
 
-	if (di->chip == BQ27500) {
-		if (di->cache.flags & BQ27500_FLAG_FC)
-			status = POWER_SUPPLY_STATUS_FULL;
-		else if (di->cache.flags & BQ27500_FLAG_DSC)
+	if (di->cache.flags & BQ27500_FLAG_FC)
+		status = POWER_SUPPLY_STATUS_FULL;
+	else {
+		/* Rely on average current to show charging or discharing */
+		s16 curr = bq27x00_read(di, BQ27x00_REG_AI, false);
+
+		if (curr < 0)
 			status = POWER_SUPPLY_STATUS_DISCHARGING;
 		else
 			status = POWER_SUPPLY_STATUS_CHARGING;
-	} else {
-		if (di->cache.flags & BQ27000_FLAG_FC)
-			status = POWER_SUPPLY_STATUS_FULL;
-		else if (di->cache.flags & BQ27000_FLAG_CHGS)
-			status = POWER_SUPPLY_STATUS_CHARGING;
-		else if (power_supply_am_i_supplied(&di->bat))
-			status = POWER_SUPPLY_STATUS_NOT_CHARGING;
-		else
-			status = POWER_SUPPLY_STATUS_DISCHARGING;
 	}
 
 	val->intval = status;
