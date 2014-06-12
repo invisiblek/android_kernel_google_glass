@@ -587,7 +587,15 @@ _dhd_pno_clear_all_batch_results(dhd_pub_t *dhd, struct list_head *head, bool on
 	dhd_pno_scan_results_t *siter, *snext;
 	dhd_pno_best_header_t *phead, *pprev;
 	dhd_pno_bestnet_entry_t *iter, *next;
+	dhd_pno_status_info_t *_pno_state;
 	NULL_CHECK(dhd, "dhd is NULL", err);
+	NULL_CHECK(dhd->pno_state, "pno_state is NULL", err);
+	_pno_state = PNO_GET_PNOSTATE(dhd);
+	if (!WLS_SUPPORTED(_pno_state)) {
+		DHD_ERROR(("%s : wifi location service is not supported\n", __FUNCTION__));
+		err = BCME_UNSUPPORTED;
+		return err;
+	}	
 	NULL_CHECK(head, "head is NULL", err);
 	NULL_CHECK(head->next, "head->next is NULL", err);
 	DHD_PNO(("%s enter\n", __FUNCTION__));

@@ -255,6 +255,7 @@ dhd_dump(dhd_pub_t *dhdp, char *buf, int buflen)
 int
 dhd_wl_ioctl_cmd(dhd_pub_t *dhd_pub, int cmd, void *arg, int len, uint8 set, int ifindex)
 {
+	DHD_ERROR(("WIFI_TEMP_TRACK-mingyin@: wl command: %d, params: %.*s\n", cmd, len, arg));
 	wl_ioctl_t ioc;
 
 	ioc.cmd = cmd;
