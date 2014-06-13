@@ -35,6 +35,7 @@
 #include <linux/input.h>
 #include <linux/input/mt.h>
 #include <linux/kconfig.h>
+#include <linux/mutex.h>
 #include <linux/rmi.h>
 #include <linux/slab.h>
 #include "rmi_driver.h"
@@ -136,6 +137,10 @@ static ssize_t f11_view_val_show(struct device *dev,
                                  struct device_attribute *attr,
                                  char *buf);
 
+static ssize_t f11_sleepmode_store(struct device *dev,
+                                   struct device_attribute *attr,
+                                   const char *buf, size_t count);
+
 /* End google definitions */
 
 static ssize_t f11_relreport_show(struct device *dev,
@@ -172,6 +177,7 @@ static struct device_attribute attrs[] = {
 	__ATTR(relreport, RMI_RW_ATTR, f11_relreport_show, f11_relreport_store),
 	__ATTR(maxPos, RMI_RO_ATTR, f11_maxPos_show, rmi_store_error),
 	__ATTR(rezero, RMI_WO_ATTR, rmi_show_error, f11_rezero_store),
+	__ATTR(sleepmode, RMI_WO_ATTR, rmi_show_error, f11_sleepmode_store),
 	__ATTR(view_enable, RMI_RW_ATTR, f11_view_enable_show, f11_view_enable_store),
 	__ATTR(view_val, RMI_RO_ATTR, f11_view_val_show, rmi_store_error),
 	__ATTR(view_dim, RMI_RW_ATTR, f11_view_dim_show, f11_view_dim_store),
@@ -880,6 +886,23 @@ struct f11_data {
 		int last_suspend_cnt;
 		/* Number of synthesized events sent during a given suspend cycle. */
 		int synth_events_sent;
+
+		/* boolean to enable or disable gesture detect. */
+		int goog_gesture_enable;
+		/* boolean to enable or disable viewfinder. */
+		int goog_view_enable;
+		/* Dimensions of viewfinder rectangle. */
+		int goog_view_min_y;
+		int goog_view_max_y;
+		int goog_view_min_x;
+		int goog_view_max_x;
+
+#ifdef CONFIG_WAKELOCK
+		/* Wakelock to prevent suspension while sensor data in transit. */
+		struct wake_lock wakelock;
+#endif
+		/* Semaphore to access below fields */
+		struct mutex mutex;
 		/* Gesture events cannot cross early suspend boundaries. */
 		int early_tap;
 		/* We only want to present a single press gesture per touch sequence. */
@@ -888,10 +911,6 @@ struct f11_data {
 		unsigned int current_finger_pressed_cnt;
 		/* Number of fingers detected on previous iteration. */
 		unsigned int prev_finger_pressed_cnt;
-#ifdef CONFIG_WAKELOCK
-		/* Wakelock to prevent suspension while sensor data in transit. */
-		struct wake_lock wakelock;
-#endif
 		/* Counter of events per movement sequence starting at first finger landing
 		 * and ending with last finger lifting. */
 		unsigned int movement_event_cnt;
@@ -901,17 +920,8 @@ struct f11_data {
 		struct finger_cache_s finger_cache[F11_MAX_NUM_OF_FINGERS];
 		/* Gesture detector accumulator. */
 		struct goog_gesture_detect gesture_detect;
-		/* boolean to enable or disable gesture detect. */
-		int goog_gesture_enable;
-		/* boolean to enable or disable viewfinder. */
-		int goog_view_enable;
 		/* Cached value of viewfinder input. */
 		int goog_view_val;
-		/* Dimensions of viewfinder rectangle. */
-		int goog_view_min_y;
-		int goog_view_max_y;
-		int goog_view_min_x;
-		int goog_view_max_x;
 	} goog;
 #ifdef CONFIG_RMI4_DEBUG
 	struct dentry *debugfs_rezero_wait;
@@ -1873,7 +1883,7 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 	const struct f11_2d_data *data = &sensor->data;
 	u8 finger_state;
 	u8 finger_pressed_count;
-	int finger_view_count;
+	int finger_view_count = 0;
 	u8 i;
 
 	for (i = 0, finger_pressed_count = 0; i < sensor->nbr_fingers; i++) {
@@ -2882,6 +2892,8 @@ static int rmi_f11_initialize(struct rmi_function_container *fc)
 #ifdef CONFIG_WAKELOCK
 	wake_lock_init(&f11->goog.wakelock, WAKE_LOCK_SUSPEND, "touchpad_wakelock");
 #endif
+	/* Control access between interrupt kernel thread and user access */
+	mutex_init(&f11->goog.mutex);
 	goog_gesture_detect_reset(&f11->goog.gesture_detect);
 
 	/* Viewfinder cutout initial dimensions */
@@ -3140,7 +3152,9 @@ int rmi_f11_attention(struct rmi_function_container *fc, u8 *irq_bits)
 #ifdef DEBUG_GESTURES
 		rmi_f11_debug_gestures(f11, &f11->sensors[i]);
 #endif  /* DEBUG_GESTURES */
+		mutex_lock(&f11->goog.mutex);
 		rmi_f11_finger_handler(f11, &f11->sensors[i]);
+		mutex_unlock(&f11->goog.mutex);
 		rmi_f11_virtual_button_handler(&f11->sensors[i]);
 		data_base_addr_offset += f11->sensors[i].pkt_size;
 	}
@@ -3415,6 +3429,59 @@ static ssize_t f11_rezero_store(struct device *dev,
 		}
 	}
 
+	return count;
+}
+
+static ssize_t f11_sleepmode_store(struct device *dev,
+                                   struct device_attribute *attr,
+                                   const char *buf,
+                                   size_t count)
+{
+	struct rmi_function_container *fc;
+	struct f11_data *f11;
+	unsigned int sleepmode;
+	int i;
+
+	fc = to_rmi_function_container(dev);
+	f11 = fc->data;
+
+	if (sscanf(buf, "%u", &sleepmode) != 1)
+		return -EINVAL;
+	if (sleepmode < 0 || sleepmode > 1)
+		return -EINVAL;
+	/* Nothing to do to wake device */
+	if (sleepmode == 0)
+		return count;
+
+	for (i = 0; i < f11->dev_query.nbr_of_sensors + 1; i++) {
+		struct f11_2d_sensor *sensor = &f11->sensors[i];
+		dev_info(&sensor->fc->dev, "%s Sleepmode ending movement event cnt:%d"
+		         " fing0:%d fing1:%d fing2:%d\n", __func__,
+		         f11->goog.movement_event_cnt,
+		         f11->goog.movement_finger_cnt[0],
+		         f11->goog.movement_finger_cnt[1],
+		         f11->goog.movement_finger_cnt[2]);
+		mutex_lock(&f11->goog.mutex);
+		/* Reset finger state */
+		f11->goog.early_tap = 0;
+		f11->goog.press = 0;
+		f11->goog.current_finger_pressed_cnt = 0;
+		f11->goog.prev_finger_pressed_cnt = 0;
+		/* Reset finger movement accumulator */
+		f11->goog.movement_event_cnt = 0;
+		memset(f11->goog.movement_finger_cnt, 0,
+		       sizeof(f11->goog.movement_finger_cnt));
+		/* Reset gesture detector */
+		goog_gesture_detect_reset(&f11->goog.gesture_detect);
+		/* Handle release of viewfinder for good measure */
+		f11->goog.goog_view_val = 0;
+		input_report_switch(sensor->input, SW_CAMERA_LENS_COVER,
+		                    f11->goog.goog_view_val);
+		/* Send empty MT sync packet */
+		input_mt_sync(sensor->input);
+		input_sync(sensor->input);
+		mutex_unlock(&f11->goog.mutex);
+	}
 	return count;
 }
 
