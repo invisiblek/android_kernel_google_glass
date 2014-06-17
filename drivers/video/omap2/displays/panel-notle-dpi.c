@@ -1156,7 +1156,7 @@ static void gamma_setup(const struct gamma_point *curve, struct notle_drv_data *
   if (curve == NULL) {
     curve = get_panel_data(dssdev)->notle_version >= V1_5_PROTO
         ? gamma_curve_v1_5
-        : gamma_curve_legacy;
+        : gamma_curve_v1_0;
   }
   memcpy(gamma_curve, curve, sizeof gamma_curve);
   if (memcmp(curve, gamma_curve_legacy, sizeof gamma_curve) == 0) {
