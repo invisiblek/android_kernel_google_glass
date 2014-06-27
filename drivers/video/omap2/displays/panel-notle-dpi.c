@@ -269,7 +269,7 @@ static struct panel_config notle_config = {
         .acbi                   = 0x0,
         .acb                    = 0x0,
         .config                 = OMAP_DSS_LCD_TFT,
-        .power_on_delay         = 0,
+        .power_on_delay         = 16,
         .power_off_delay        = 0,
 };
 
