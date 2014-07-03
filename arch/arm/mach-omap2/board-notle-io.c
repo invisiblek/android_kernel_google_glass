@@ -11,6 +11,8 @@
 #include <linux/spinlock.h>
 #include "board-notle.h"
 
+volatile bool $$host_wake;
+
 struct omap_pin_stat {
 	const char *name;
 	const char *use;
@@ -297,6 +299,7 @@ void omap_board_wk_event(int index)
 	notle_wk_stats[index].count++;
 	wakeup_count++;
 
+	$$host_wake = true;
 	set_last_wakeup(&notle_wk_stats[index]);
 }
 
