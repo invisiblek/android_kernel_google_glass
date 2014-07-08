@@ -2826,6 +2826,12 @@ static int omap_hsmmc_suspend(struct device *dev)
 	if (host && host->suspended)
 		return 0;
 
+	if (host->req_in_progress) {
+		// (TODO): Remove printk
+		printk("%s:%d request in progress, return -EBUSY\n", __func__, __LINE__);
+		return -EBUSY;
+	}
+
 	pm_runtime_get_sync(host->dev);
 	host->suspended = 1;
 	if (host->pdata->suspend) {
