@@ -903,6 +903,8 @@ struct f11_data {
 #endif
 		/* Semaphore to access below fields */
 		struct mutex mutex;
+		/* boolean to specify sleeping or waking modes. */
+		int sleepmode;
 		/* Gesture events cannot cross early suspend boundaries. */
 		int early_tap;
 		/* We only want to present a single press gesture per touch sequence. */
@@ -2894,6 +2896,7 @@ static int rmi_f11_initialize(struct rmi_function_container *fc)
 #endif
 	/* Control access between interrupt kernel thread and user access */
 	mutex_init(&f11->goog.mutex);
+
 	goog_gesture_detect_reset(&f11->goog.gesture_detect);
 
 	/* Viewfinder cutout initial dimensions */
@@ -3142,22 +3145,32 @@ int rmi_f11_attention(struct rmi_function_container *fc, u8 *irq_bits)
 	int error;
 	int i;
 
+	mutex_lock(&f11->goog.mutex);
+
 	for (i = 0; i < f11->dev_query.nbr_of_sensors + 1; i++) {
 		error = rmi_read_block(rmi_dev,
 				data_base_addr + data_base_addr_offset,
 				f11->sensors[i].data_pkt,
 				f11->sensors[i].pkt_size);
-		if (error < 0)
+		if (error < 0) {
+			mutex_unlock(&f11->goog.mutex);
 			return error;
+		}
 #ifdef DEBUG_GESTURES
 		rmi_f11_debug_gestures(f11, &f11->sensors[i]);
 #endif  /* DEBUG_GESTURES */
-		mutex_lock(&f11->goog.mutex);
-		rmi_f11_finger_handler(f11, &f11->sensors[i]);
-		mutex_unlock(&f11->goog.mutex);
+		/* Only process finger events if awake */
+		if (f11->goog.sleepmode == 0) {
+		    rmi_f11_finger_handler(f11, &f11->sensors[i]);
+		} else {
+			dev_info(&fc->dev, "%s sleepmode enabled skipping event handling\n",
+			         __func__);
+		}
 		rmi_f11_virtual_button_handler(&f11->sensors[i]);
 		data_base_addr_offset += f11->sensors[i].pkt_size;
 	}
+
+	mutex_unlock(&f11->goog.mutex);
 
 	return 0;
 }
@@ -3449,39 +3462,48 @@ static ssize_t f11_sleepmode_store(struct device *dev,
 		return -EINVAL;
 	if (sleepmode < 0 || sleepmode > 1)
 		return -EINVAL;
-	/* Nothing to do to wake device */
-	if (sleepmode == 0)
-		return count;
+
+	mutex_lock(&f11->goog.mutex);
+
+	/* Set the sleepmode for this device. */
+	f11->goog.sleepmode = sleepmode;
 
 	for (i = 0; i < f11->dev_query.nbr_of_sensors + 1; i++) {
 		struct f11_2d_sensor *sensor = &f11->sensors[i];
-		dev_info(&sensor->fc->dev, "%s Sleepmode ending movement event cnt:%d"
-		         " fing0:%d fing1:%d fing2:%d\n", __func__,
-		         f11->goog.movement_event_cnt,
-		         f11->goog.movement_finger_cnt[0],
-		         f11->goog.movement_finger_cnt[1],
-		         f11->goog.movement_finger_cnt[2]);
-		mutex_lock(&f11->goog.mutex);
-		/* Reset finger state */
-		f11->goog.early_tap = 0;
-		f11->goog.press = 0;
-		f11->goog.current_finger_pressed_cnt = 0;
-		f11->goog.prev_finger_pressed_cnt = 0;
-		/* Reset finger movement accumulator */
-		f11->goog.movement_event_cnt = 0;
-		memset(f11->goog.movement_finger_cnt, 0,
-		       sizeof(f11->goog.movement_finger_cnt));
-		/* Reset gesture detector */
-		goog_gesture_detect_reset(&f11->goog.gesture_detect);
-		/* Handle release of viewfinder for good measure */
-		f11->goog.goog_view_val = 0;
-		input_report_switch(sensor->input, SW_CAMERA_LENS_COVER,
-		                    f11->goog.goog_view_val);
-		/* Send empty MT sync packet */
-		input_mt_sync(sensor->input);
-		input_sync(sensor->input);
-		mutex_unlock(&f11->goog.mutex);
+		if (f11->goog.sleepmode == 0) {
+		/* We are no longer asleep and will process input events */
+			dev_info(&sensor->fc->dev, "%s waking", __func__);
+		} else {
+			/* We will terminate current event chains and cease processing
+			   new input events */
+			dev_info(&sensor->fc->dev, "%s sleeping ending movement event"
+			         " cnt:%d fing0:%d fing1:%d fing2:%d\n", __func__,
+			         f11->goog.movement_event_cnt,
+			         f11->goog.movement_finger_cnt[0],
+			         f11->goog.movement_finger_cnt[1],
+			         f11->goog.movement_finger_cnt[2]);
+			/* Reset finger state */
+			f11->goog.early_tap = 0;
+			f11->goog.press = 0;
+			f11->goog.current_finger_pressed_cnt = 0;
+			f11->goog.prev_finger_pressed_cnt = 0;
+			/* Reset finger movement accumulator */
+			f11->goog.movement_event_cnt = 0;
+			memset(f11->goog.movement_finger_cnt, 0,
+			       sizeof(f11->goog.movement_finger_cnt));
+			/* Reset gesture detector */
+			goog_gesture_detect_reset(&f11->goog.gesture_detect);
+			/* Handle release of viewfinder for good measure */
+			f11->goog.goog_view_val = 0;
+			input_report_switch(sensor->input, SW_CAMERA_LENS_COVER,
+			                    f11->goog.goog_view_val);
+			/* Send empty MT sync packet */
+			input_mt_sync(sensor->input);
+			input_sync(sensor->input);
+		}
 	}
+
+	mutex_unlock(&f11->goog.mutex);
 	return count;
 }
 
