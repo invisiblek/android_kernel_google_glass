@@ -280,14 +280,16 @@ static void mmc_wait_for_req_done(struct mmc_host *host,
 	struct mmc_command *cmd;
 
 	while (1) {
-		wait_for_completion(&mrq->completion);
+		while (!wait_for_completion_timeout(&mrq->completion, 30*HZ))
+			dev_err(&host->class_dev, "Can't complete cmd %d %p\n",
+				mrq->cmd->opcode, mrq);
 
 		cmd = mrq->cmd;
 		if (!cmd->error || !cmd->retries ||
 		    mmc_card_removed(host->card))
 			break;
 
-		pr_debug("%s: req failed (CMD%u): %d, retrying...\n",
+		pr_err("%s: req failed (CMD%u): %d, retrying...\n",
 			 mmc_hostname(host), cmd->opcode, cmd->error);
 		cmd->retries--;
 		cmd->error = 0;
