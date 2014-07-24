@@ -1551,9 +1551,9 @@ static void led_config_pwm(struct omap_dss_device *dssdev,
     if (ledaux_state & 0x02) {
       /* Double strength green
        * LED is sub-linear at 60mA, From data sheet luminosity boost
-       * is ~1.6 = 410/256
+       * is ~1.6.  1/1.6 = 5/8
        */
-      for (i = 0; i < 3; i++) rgbmat[1][i] = (rgbmat[1][i]*410)>>8;
+      for (i = 0; i < 3; i++) rgbmat[1][i] = (rgbmat[1][i]*5)>>3;
     }
 
     /* Calculate monochrome PWM */
