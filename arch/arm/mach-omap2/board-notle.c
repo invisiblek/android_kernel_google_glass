@@ -713,6 +713,7 @@ static struct omap2_hsmmc_info mmc[] = {
 		.nonremovable   = true,
 		.ocr_mask	= MMC_VDD_29_30,
                 .no_off_init    = true,
+                .built_in       = 1,
                 // TODO(rocky): Experiment with turning this off to see if
                 // it improves hsmmc suspend/resume problem.  Measured
                 // effect on current draw is zero.
@@ -723,11 +724,11 @@ static struct omap2_hsmmc_info mmc[] = {
                 .mmc            = 5,
                 .caps           = MMC_CAP_4_BIT_DATA,
                 .pm_caps        = MMC_PM_KEEP_POWER,
-                    // TODO(abliss): | MMC_CAP_POWER_OFF_CARD,
                 .gpio_wp        = -EINVAL,
                 .gpio_cd        = -EINVAL,
                 .ocr_mask	= MMC_VDD_165_195 | MMC_VDD_20_21,
                 .nonremovable   = true,
+                .built_in       = 1,
 		.mmc_data	= &tuna_wifi_data,
         },
         /* This device is only present on Dog devices.  It will be blanked out
