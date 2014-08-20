@@ -920,10 +920,9 @@ static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 							ret));
 				}
 			}
-            DHD_ERROR(("WIFI_TEMP_TRACK-mingyin@: The end of dhd_set_suspend"));
 	}
 	dhd_suspend_unlock(dhd);
-	DHD_ERROR(("%s done\n", __FUNCTION__));
+
 	return 0;
 }
 
