@@ -2,13 +2,13 @@
  * BCMSDH Function Driver for the native SDIO/MMC driver in the Linux Kernel
  *
  * Copyright (C) 1999-2014, Broadcom Corporation
- * 
+ *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- * 
+ *
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,7 +16,7 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- * 
+ *
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
@@ -87,6 +87,11 @@ void sdio_function_cleanup(void);
 
 /* module param defaults */
 static int clockoverride = 0;
+#ifdef CONFIG_MACH_NOTLE
+struct workqueue_struct *sdmmc_pm_workqueue;
+struct delayed_work      bcmshd_resume_work;
+struct sdio_func        *bcmshd_resume_work_sdio_func;
+#endif
 
 module_param(clockoverride, int, 0644);
 MODULE_PARM_DESC(clockoverride, "SDIO card clock override");
@@ -161,6 +166,30 @@ static void sdioh_remove(struct sdio_func *func)
 	osl_detach(osh);
 }
 
+#ifdef CONFIG_MACH_NOTLE
+static void bcmshd_resume_delayed_work_fn(struct work_struct * work)
+{
+	if (dhd_mmc_suspend)
+	{
+		sdioh_info_t *sdioh;
+		struct sdio_func *func = bcmshd_resume_work_sdio_func;
+		printk("\nbcmshd_resume_delayed_work_fn\n");
+
+		sd_err(("%s Enter\n", __FUNCTION__));
+
+		if (func->num != 2)
+			return;
+
+		sdioh = sdio_get_drvdata(func);
+		dhd_mmc_suspend = FALSE;
+#if defined(OOB_INTR_ONLY)
+		bcmsdh_resume(sdioh->bcmsdh);
+#endif
+		smp_mb();
+	}
+}
+#endif
+
 static int bcmsdh_sdmmc_probe(struct sdio_func *func,
                               const struct sdio_device_id *id)
 {
@@ -178,7 +207,16 @@ static int bcmsdh_sdmmc_probe(struct sdio_func *func,
 	/* 4318 doesn't have function 2 */
 	if ((func->num == 2) || (func->num == 1 && func->device == 0x4))
 		ret = sdioh_probe(func);
-
+#ifdef CONFIG_MACH_NOTLE
+	if (func->num == 2) {
+		sdmmc_pm_workqueue = create_freezable_workqueue("bcmsdh_sdmmc");
+		if (IS_ERR(sdmmc_pm_workqueue)) {
+			sd_err(("bcmsdh fail to create workqueue\n"));
+			return -EINVAL;
+		}
+		INIT_DELAYED_WORK(&bcmshd_resume_work, bcmshd_resume_delayed_work_fn);
+	}
+#endif
 	return ret;
 }
 
@@ -197,6 +235,13 @@ static void bcmsdh_sdmmc_remove(struct sdio_func *func)
 
 	if ((func->num == 2) || (func->num == 1 && func->device == 0x4))
 		sdioh_remove(func);
+
+#ifdef CONFIG_MACH_NOTLE
+	if (func->num == 2) {
+		cancel_delayed_work_sync(&bcmshd_resume_work);
+		destroy_workqueue(sdmmc_pm_workqueue);
+	}
+#endif
 }
 
 /* devices we support, null terminated */
@@ -224,6 +269,7 @@ static int bcmsdh_sdmmc_suspend(struct device *pdev)
 	struct sdio_func *func = dev_to_sdio_func(pdev);
 	mmc_pm_flag_t sdio_flags;
 
+	dev_err(pdev,"%s(%d) [%08x]\n",__func__, __LINE__,(unsigned int*) pdev);
 	sd_err(("%s Enter\n", __FUNCTION__));
 	if (func->num != 2)
 		return 0;
@@ -247,7 +293,7 @@ static int bcmsdh_sdmmc_suspend(struct device *pdev)
 	}
 #if defined(OOB_INTR_ONLY)
 	bcmsdh_oob_intr_set(sdioh->bcmsdh, FALSE);
-#endif 
+#endif
 	dhd_mmc_suspend = TRUE;
 	smp_mb();
 
@@ -256,6 +302,17 @@ static int bcmsdh_sdmmc_suspend(struct device *pdev)
 
 static int bcmsdh_sdmmc_resume(struct device *pdev)
 {
+#ifdef CONFIG_MACH_NOTLE
+	struct sdio_func *func = dev_to_sdio_func(pdev);
+
+	dev_err(pdev,"%s(%d) [%08x]\n",__func__, __LINE__,(unsigned int*) pdev);
+	sd_err(("%s Enter\n", __FUNCTION__));
+	if (func->num != 2)
+		return 0;
+
+	bcmshd_resume_work_sdio_func = dev_to_sdio_func(pdev);
+	queue_delayed_work(sdmmc_pm_workqueue, &bcmshd_resume_work, msecs_to_jiffies(0));
+#else
 	sdioh_info_t *sdioh;
 	struct sdio_func *func = dev_to_sdio_func(pdev);
 
@@ -267,9 +324,11 @@ static int bcmsdh_sdmmc_resume(struct device *pdev)
 	dhd_mmc_suspend = FALSE;
 #if defined(OOB_INTR_ONLY)
 	bcmsdh_resume(sdioh->bcmsdh);
-#endif 
+#endif
 
 	smp_mb();
+#endif
+
 	return 0;
 }
 
