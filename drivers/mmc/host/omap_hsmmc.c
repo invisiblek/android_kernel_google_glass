@@ -1011,7 +1011,6 @@ omap_hsmmc_get_dma_dir(struct omap_hsmmc_host *host, struct mmc_data *data)
 
 static void omap_hsmmc_request_done(struct omap_hsmmc_host *host, struct mmc_request *mrq)
 {
-	static int repeat_count = 0;
 	int dma_ch;
 	unsigned long flags;
 
@@ -1022,11 +1021,8 @@ static void omap_hsmmc_request_done(struct omap_hsmmc_host *host, struct mmc_req
 
 	omap_hsmmc_disable_irq(host);
 	/* Do not complete the request if DMA is still in progress */
-	if (mrq->data && host->dma_type && dma_ch != -1) {
-		if (++repeat_count % 1000 == 0)
-			printk("~~~ %s aborting callback due to in-progress DMA\n", __func__);
+	if (mrq->data && host->dma_type && dma_ch != -1)
 		return;
-	}
 	host->mrq = NULL;
 	mmc_request_done(host->mmc, mrq);
 }
@@ -1319,15 +1315,8 @@ static void omap_hsmmc_do_irq(struct omap_hsmmc_host *host, int status)
 
 	if (end_cmd || ((status & CC) && host->cmd))
 		omap_hsmmc_cmd_done(host, host->cmd);
-	else if (host->cmd) {
-		printk("~~~ unterminated command status: 0x%08X, arg: 0x%08X\n", status, host->cmd->arg);
-	}
-
 	if ((end_trans || (status & TC)) && host->mrq)
 		omap_hsmmc_xfer_done(host, data);
-	else if (host->mrq && !(status & CC)) {
-		printk("~~~ unterminated data status: 0x%08X\n", status);
-	}
 }
 
 /*

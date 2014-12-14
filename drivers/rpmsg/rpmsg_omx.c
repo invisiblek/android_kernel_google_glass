@@ -37,6 +37,7 @@
 #include <linux/completion.h>
 #include <linux/remoteproc.h>
 #include <linux/fdtable.h>
+#include <linux/wakelock.h>
 
 #ifdef CONFIG_ION_OMAP
 #include <linux/ion.h>
@@ -66,6 +67,9 @@ struct rpmsg_omx_service {
 	struct list_head list;
 	struct mutex lock;
 	struct completion comp;
+	char rpmsg_wakelock_name[50];
+	struct wake_lock rpmsg_wakelock;
+	int rpmsg_wakelock_count;
 #ifdef CONFIG_ION_OMAP
 	struct ion_client *ion_client;
 #endif
@@ -583,7 +587,7 @@ long rpmsg_omx_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case OMX_GET_TIMER:
 	{
 		struct omx_get_timer data;
-		struct timespec ts;
+		/*struct timespec ts;*/
 
 		/*read_persistent_clock(&ts);*/
 		data.persistent_timer = read_robust_clock();
@@ -674,6 +678,11 @@ static int rpmsg_omx_open(struct inode *inode, struct file *filp)
 
 	dev_dbg(omxserv->dev, "local addr assigned: 0x%x\n", omx->ept->addr);
 
+	mutex_lock(&omxserv->lock);
+	if (omxserv->rpmsg_wakelock_count == 0)
+		wake_lock(&omxserv->rpmsg_wakelock);
+	omxserv->rpmsg_wakelock_count ++;
+	mutex_unlock(&omxserv->lock);
 	return 0;
 err:
 	kfree(omx);
@@ -737,6 +746,14 @@ static int rpmsg_omx_release(struct inode *inode, struct file *filp)
 	 */
 	if (omx->state != OMX_FAIL)
 		rpmsg_destroy_ept(omx->ept);
+
+	if (omxserv->rpmsg_wakelock_count) {
+		omxserv->rpmsg_wakelock_count --;
+		if (omxserv->rpmsg_wakelock_count == 0) {
+			wake_unlock(&omxserv->rpmsg_wakelock);
+		}
+	}
+
 	mutex_unlock(&omxserv->lock);
 	kfree(omx);
 
@@ -942,6 +959,9 @@ static int rpmsg_omx_probe(struct rpmsg_channel *rpdev)
 serv_up:
 	complete_all(&omxserv->comp);
 
+	snprintf(omxserv->rpmsg_wakelock_name, 50, "%s_wakelock", rpdev->id.name);
+	wake_lock_init(&omxserv->rpmsg_wakelock, WAKE_LOCK_SUSPEND, omxserv->rpmsg_wakelock_name);
+	omxserv->rpmsg_wakelock_count = 0;
 	dev_info(omxserv->dev, "new OMX connection srv channel: %u -> %u!\n",
 						rpdev->src, rpdev->dst);
 	mutex_unlock(&rpmsg_omx_services_lock);
@@ -971,6 +991,8 @@ static void __devexit rpmsg_omx_remove(struct rpmsg_channel *rpdev)
 		cdev_del(&omxserv->cdev);
 		mutex_lock(&rpmsg_omx_services_lock);
 		idr_remove(&rpmsg_omx_services, omxserv->minor);
+		wake_lock_destroy(&omxserv->rpmsg_wakelock);
+		omxserv->rpmsg_wakelock_count = 0;
 		mutex_unlock(&rpmsg_omx_services_lock);
 		kfree(omxserv);
 		return;
@@ -990,6 +1012,8 @@ static void __devexit rpmsg_omx_remove(struct rpmsg_channel *rpdev)
 		rpmsg_destroy_ept(omx->ept);
 	}
 	omxserv->rpdev = NULL;
+	wake_lock_destroy(&omxserv->rpmsg_wakelock);
+	omxserv->rpmsg_wakelock_count = 0;
 	mutex_unlock(&omxserv->lock);
 }
 

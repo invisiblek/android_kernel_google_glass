@@ -123,7 +123,6 @@ static inline void mmc_should_fail_request(struct mmc_host *host,
 
 #endif /* CONFIG_FAIL_MMC_REQUEST */
 
-extern volatile bool $$host_wake;
 /**
  *	mmc_request_done - finish processing an MMC request
  *	@host: MMC host which completed request
@@ -147,13 +146,8 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 		 * Request starter must handle retries - see
 		 * mmc_wait_for_req_done().
 		 */
-		if (mrq->done) {
-			if ($$host_wake) {
-				printk("~~~ mmc request done (error path)");
-				$$host_wake = false;
-			}
+		if (mrq->done)
 			mrq->done(mrq);
-		}
 	} else {
 		mmc_should_fail_request(host, mrq);
 
@@ -178,13 +172,8 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
 				mrq->stop->resp[2], mrq->stop->resp[3]);
 		}
 
-		if (mrq->done) {
-			if ($$host_wake) {
-				printk("~~~ mmc request done (success path)");
-				$$host_wake = false;
-			}
+		if (mrq->done)
 			mrq->done(mrq);
-		}
 
 		mmc_host_clk_release(host);
 	}

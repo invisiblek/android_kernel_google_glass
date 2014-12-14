@@ -1866,7 +1866,7 @@ static void goog_gesture_handler(struct f11_data *f11,
 		 */
 		f11->goog.early_tap = 0;
 	} else {
-		dev_info(&f11->sensors[0].fc->dev, "%s Ignoring driver"
+		dev_dbg(&f11->sensors[0].fc->dev, "%s Ignoring driver"
 		         " synthesized single tap gesture\n", __func__);
 		dev_dbg(&f11->sensors[0].fc->dev, "%s max_x:%d min_x:%d"
 		        " max_y:%d min_y:%d cnt:%d fgr:%d time:%d s:%ld"
@@ -2095,7 +2095,7 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 
 	/* Debugging logging */
 	if (f11->goog.prev_finger_pressed_cnt == 0 && f11->goog.current_finger_pressed_cnt != 0) {
-		dev_info(&sensor->fc->dev, "%s Starting movement event"
+		dev_dbg(&sensor->fc->dev, "%s Starting movement event"
 		         " cnt:%d\n", __func__, f11->goog.movement_event_cnt);
 	}
 	if (f11->goog.prev_finger_pressed_cnt != 0 && f11->goog.current_finger_pressed_cnt == 0) {
@@ -2104,7 +2104,7 @@ static void rmi_f11_finger_handler(struct f11_data *f11,
 		   time value before the potentially long printk command. */
 		f11->goog.gesture_detect.time_end = jiffies;
 
-		dev_info(&sensor->fc->dev, "%s Ending movement event cnt:%d"
+		dev_dbg(&sensor->fc->dev, "%s Ending movement event cnt:%d"
 		         " fing0:%d fing1:%d fing2:%d\n", __func__,
 		         f11->goog.movement_event_cnt,
 		         f11->goog.movement_finger_cnt[0],
